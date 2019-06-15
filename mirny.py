@@ -2,130 +2,187 @@ from migen import *
 
 
 # increment this if the behavior (LEDs, registers, EEM pins) changes
-__proto_rev__ = 8
+__proto_rev__ = 0
 
 
-class SR(Module):
-    """
-    Shift register, SPI slave
+bus_layout = [
+    ("we", 1),
+    ("adr", 7),
+    ("dat_w", 16),
+    ("dat_r", 16),
+    ("re", 1),
+]
 
-    * CPOL = 0 (clock idle low during ~SEL)
-    * CPHA = 0 (sample on first edge, shift on second)
-    * SPI mode 0
-    * samples SDI on rising clock edges (SCK1 domain)
-    * shifts out SDO on falling clock edges (SCK0 domain)
-    * MSB first
-    * the first output bit (MSB) is undefined
-    * the first output bit is available from the start of the SEL cycle until
-      the first falling edge
-    * the first input bit is sampled on the first rising edge
-    * on the first rising edge with SEL assered, the parallel data DO
-      is loaded into the shift register
-    * following at least one rising clock edge, on the deassertion of SEL,
-      the shift register is loaded into the parallel data register DI
-    """
-    def __init__(self, adr_width=8, width=32):
-        self.sdi = Signal()
-        self.sdo = Signal()
-        self.sel = Signal()
-
-        self.adr = Signal(adr_width)
-        self.di = Signal(width)
-        self.do = Signal(width)
-
-        # # #
-
-        sr = Signal(width)
-
-        self.clock_domains.cd_le = ClockDomain("le", reset_less=True)
-        # clock the latch domain from selection deassertion but only after
-        # there was a serial clock edge with asserted select (i.e. ignore
-        # glitches).
-        self.specials += Instance("FDPE", p_INIT=1,
-                i_D=0, i_C=ClockSignal("sck1"), i_CE=self.sel, i_PRE=~self.sel,
-                o_Q=self.cd_le.clk)
-
-        self.sync.sck0 += [
-                If(self.sel,
-                    self.sdo.eq(sr[-1]),
-
-                )
-        ]
-        self.sync.sck1 += [
-                If(self.sel,
-                    sr[0].eq(self.sdi),
-                    If(self.cd_le.clk,
-                        sr[1:].eq(self.do[:-1])
-                    ).Else(
-                        sr[1:].eq(sr[:-1])
-                    )
-                )
-        ]
-        self.sync.le += [
-                self.di.eq(sr)
-        ]
-
+ext_layout = [
+    ("cs", 1),
+    ("sck", 1),
+    ("sdo", 1),
+    ("sdi", 1),
+]
 
 class CFG(Module):
-    """Configuration register
+    def __init__(self, width=None):
+        self.bus = Record(bus_layout)
+        if width is None:
+            width = len(self.bus.dat_w)
+        self.cfg = Signal(width)
+        self.sync += [
+            If(self.bus.we,
+                self.cfg.eq(self.bus.dat_w)
+            )
+        ]
+        self.comb += self.bus.dat_r.eq(self.cfg)
 
-    The configuration register is updated at last falling SCK edge of the SPI
-    transaction. The initial state is 0 (all bits cleared).
-    The bits in the configuration register (from LSB to MSB) are:
 
-    | Name      | Width | Function                           |
-    |-----------+-------+------------------------------------|
-    | RF_SW     | 4     | Activates RF switch                |
+class STA(Module):
+    def __init__(self, width=None):
+        self.bus = Record(bus_layout)
+        if width is None:
+            width = len(self.bus.dat_w)
+        self.sta = Signal(width)
+        self.comb += self.bus.dat_r.eq(self.sta)
 
-    | Name      | Width | Function                           |
-    |-----------+-------+------------------------------------|
-    | CE        | 4     | Chip enable                        |
-    | MASK_RLED | 4     | Mask VCO ~MUXOUT to RLED           |
-    | MASK_LE   | 4     | Mask VCO latch enable              |
-    | CLK_SEL   | 2     | Selects CLK source: 0 OSC, 1 MMCX, |
-    |           |       | 2 reserved, 3 SMA                  |
-    | DIV       | 2     | Clock divider configuration:       |
-    |           |       | 0: divide-by-one,                  |
-    |           |       | 1: reserved,                       |
-    |           |       | 2: divider-by-two,                 |
-    |           |       | 3: divide-by-four                  |
-    | ATT_RST   | 1     | Attenuator asynchronous reset      |
-    |           | 1     | reserved                           |
 
-    | Name      | Width | Function                           |
-    |-----------+-------+------------------------------------|
-    | RLED      | 4     | Activates the red LED              |
-    | GLED      | 4     | Activates the green LED            |
+class REG(Module):
+    def __init__(self, width=None):
+        self.bus = Record(bus_layout)
+        if width is None:
+            width = len(self.bus.dat_w)
+        self.write = Signal(width)
+        self.read = Signal(width)
+        self.sync += [
+            If(self.bus.we,
+                self.write.eq(self.bus.dat_w)
+            )
+        ]
+        self.comb += self.bus.dat_r.eq(self.read)
 
-    | Name      | Width | Function                                  |
-    |-----------+-------+-------------------------------------------|
-    | RF_SW     | 4     | Actual RF switch and green LED activation |
-    |           |       | (including that by EEM0.SW[4:8])          |
-    | MUXOUT    | 4     | Muxout values                             |
-    | IFC_MODE  | 4     | IFC_MODE[0:3]                             |
-    | PROTO_REV | 4     | Protocol revision (see __proto_rev__)     |
-    | HW_REV    | 2     | HW rev
-    """
-    def __init__(self, platform, n=4):
-        self.data = Record([
-            ("rf_sw", n),
-            ("led", n),
 
-            ("profile", 3),
+# R,F edges happen left in each column
 
-            ("dummy", 1),
-            ("io_update", 1),
+# CS   -F__________R
+# LI    L
+# LO               L
+# CLK   _RFRFRFRFRF_
+#fMOSI  AABBWW0011
+#rSDI    AABBWW0011
+#fSTB           11
+#fRE      11
+#fSDO       0011
+#fMISO        0011
+#fN     443322110044
+#fP     111100000011
+# NSRA  0011
+# NSRD      001122
+#
+# default: falling
+# MOSI->SDI: rising
 
-            ("mask_nu", 4),
+# TODO: maybe have combinatorial MISO and a RE-ADR-pipe delay to
+# relax timing in the SDI+RE->SDO half cycle path
 
-            ("clk_sel0", 1),
-            ("sync_sel", 1),
+class SR(Module):
+    def __init__(self):
+        self.bus = Record(bus_layout)
+        self.ext = Record(ext_layout)
+        self._slaves = []
 
-            ("rst", 1),
-            ("io_rst", 1),
-            ("clk_sel1", 1),
-            ("div", 2),
-        ])
+        width = len(self.bus.dat_w) + len(self.bus.adr) + 1
+        sr_adr = Signal(len(self.bus.adr), reset_less=True)
+        sr_dat = Signal(1 + len(self.bus.dat_w), reset_less=True)
+        sr_dat_next = Signal(len(sr_dat))
+        n = Signal(max=width, reset=width - 1)  # bits to be transferred
+        p = Signal(reset=1)  # phase: {1: adr/we, 0: dat}
+        re = Signal()
+        stb = Signal()
+        sdo = Signal(reset_less=True)
+        block = Signal(reset_less=True)
+
+        self.comb += [
+            sr_dat_next.eq(Cat(self.ext.sdi, sr_dat)),
+            stb.eq(n == 0),
+            re.eq(n == len(self.bus.dat_w) + 1),
+
+            self.ext.sdo.eq(sdo),
+            self.bus.adr[1:].eq(sr_adr[1:]),
+            self.bus.adr[0].eq(Mux(p, self.ext.sdi, sr_adr[0])),
+            self.bus.dat_w.eq(sr_dat_next),
+            self.bus.we.eq(self.ext.cs & stb & sr_dat[-2] & ~block),
+            self.bus.re.eq(self.ext.cs & p & re)
+        ]
+        self.sync += [
+            If(self.ext.cs,
+                If(~block | ClockSignal("le"),
+                    block.eq(0),
+                    n.eq(n - 1),
+                ),
+                If(p,
+                    sr_adr[0].eq(self.ext.sdi),
+                    If(re,
+                        sr_dat[1:].eq(self.bus.dat_r),
+                        p.eq(0),
+                    ).Else(
+                        sr_adr[1:].eq(Cat(self.ext.sdi, sr_adr[1:])),
+                    )
+                ).Else(
+                    sr_dat.eq(sr_dat_next),
+                    If(stb,
+                        p.eq(p.reset),
+                        n.eq(n.reset),
+                        block.eq(1),
+                    ),
+                ),
+            ).Else(
+                p.eq(p.reset),
+                n.eq(n.reset),
+            ),
+            sdo.eq(sr_dat[-1]),
+        ]
+
+    def connect(self, bus, adr, mask):
+        adr &= mask
+        for _, b_adr, b_mask in self._slaves:
+            if intersection((b_adr, b_mask), (adr, mask)):
+                raise ValueError("{} intersects {}".format(
+                    (adr, mask), (b_adr, b_mask)))
+        self._slaves.append((bus, adr, mask))
+        stb = Signal()
+        self.comb += [
+            stb.eq((self.bus.adr & mask) == (adr & mask)),
+            bus.adr.eq(self.bus.adr),
+            bus.dat_w.eq(self.bus.dat_w),
+            bus.we.eq(self.bus.we & stb),
+            If(stb,
+                self.bus.dat_r.eq(bus.dat_r)
+            )
+        ]
+
+    def connect_ext(self, ext, adr, mask):
+        adr &= mask
+        for _, b_adr, b_mask in self._slaves:
+            if intersection((b_adr, b_mask), (adr, mask)):
+                raise ValueError("{} intersects {}".format(
+                    (adr, mask), (b_adr, b_mask)))
+        self._slaves.append((ext, adr, mask))
+        self.sync += [
+            If(self.bus.re,
+                ext.cs.eq(self.ext.cs &
+                          ((self.bus.adr & mask) == (adr & mask))),
+            ),
+        ]
+        self.comb += [
+            ext.sck.eq(self.ext.sck),
+            ext.sdi.eq(self.ext.sdi),
+            If(ext.cs,
+                self.ext.sdo.eq(ext.sdo)
+            )
+        ]
+
+
+def intersection(a, b):
+    (aa, am), (ba, bm) = a, b
+    # TODO
+    return False
 
 
 class Mirny(Module):
@@ -155,26 +212,63 @@ class Mirny(Module):
     SPI
     ---
 
+    SPI xfer is ADR(7), WE(1), DAT(REG: 16, ATT: 8, PLL: 32)
+
     | PREFIX | TARGET |
     |--------+--------|
-    | 0 | PLL0     |
-    | 1 | PLL1     |
-    | 2 | PLL2     |
-    | 3 | PLL3     |
-    | 4 | ATT0     |
-    | 5 | ATT0     |
-    | 6 | ATT0     |
-    | 7 | ATT0     |
-    | 8 | CFG0     |
-    | 9 | CFG0     |
-    | a | CFG0     |
-    | b | CFG0     |
-    | c | all PLL  |
-    | d | all ATT  |
-    | e | reserved |
-    | f | reserved |
+    | 0 | REG0     |
+    | 1 | REG1     |
+    | 2 | REG2     |
+    | 3 | REG3     |
+    | 4 | PLL0     |
+    | 5 | PLL1     |
+    | 6 | PLL2     |
+    | 7 | PLL3     |
+    | 8 | ATT0     |
+    | 9 | ATT1     |
+    | a | ATT2     |
+    | b | ATT3     |
+    | c | (reserved) all PLL  |
+    | d | (reserved) all ATT  |
+    | e | (reserved) MEZZ     |
+    | f | (reserved) reserved |
 
     The SPI interface is CPOL=0, CPHA=0, SPI mode 0, 4-wire, full fuplex.
+
+    Configuration register
+
+    The configuration register is updated at last falling SCK edge of the SPI
+    transaction. The initial state is 0 (all bits cleared).
+    The bits in the configuration register (from LSB to MSB) are:
+
+    | Name      | Width | Function                           |
+    |-----------+-------+------------------------------------|
+    | RF_SW     | 4     | Actual RF switch state             |
+    | MUXOUT    | 4     | Muxout values                      |
+    | IFC_MODE  | 4     | IFC_MODE[0:3]                      |
+    | HW_REV    | 2     | HW rev                             |
+    | PROTO_REV | 2     | Protocol (see __proto_rev__)       |
+
+    | Name      | Width | Function                           |
+    |-----------+-------+------------------------------------|
+    | CE        | 4     | Chip enable                        |
+    | ATT_RST   | 4     | Attenuator asynchronous reset      |
+    | CLK_SEL   | 2     | Selects CLK source: 0 OSC, 1 MMCX, |
+    |           |       | 2 reserved, 3 SMA                  |
+    | DIV       | 2     | Clock divider configuration:       |
+    |           |       | 0: divide-by-one,                  |
+    |           |       | 1: reserved,                       |
+    |           |       | 2: divider-by-two,                 |
+    |           |       | 3: divide-by-four                  |
+
+    | Name      | Width | Function                           |
+    |-----------+-------+------------------------------------|
+    | RF_SW     | 4     | Activates RF switch                |
+
+    | Name      | Width | Function                           |
+    |-----------+-------+------------------------------------|
+    | MEZZ_IO   | 8     | Mezzanine IO OI                    |
+    | MEZZ_OE   | 8     | Mezzanine IO OE                    |
 
     Test points
     -----------
@@ -183,38 +277,6 @@ class Mirny(Module):
     of the protocol revision.
     """
     def __init__(self, platform):
-        clk = platform.request("clk")
- 
-        ts_clk_div = TSTriple()
-        self.specials += [
-                ts_clk_div.get_tristate(clk.div)
-        ]
-        # TODO
-        self.comb += [
-            clk.in_sel.eq(0b00),  # VCO
-            # dividers: z: 1, 0: 2, 1: 4
-            ts_clk_div.oe.eq(0),  # div-1
-            ts_clk_div.o.eq(0),  # div-1
-        ]
-       
-        # TODO
-        # mezz_io = platform.request("mezz_io")
-        # ifc_mode = platform.request("ifc_mode")
-        # hw_rev = platform.request("hw_rev")
-
-        att = [platform.request("att", i) for i in range(4)]
-        pll = [platform.request("pll", i) for i in range(4)]
-        rf_sw = [platform.request("rf_sw", i) for i in range(4)]
-        led = [platform.request("led", i) for i in range(4)]
-
-        # TODO
-        for rf_sw_i, ledi, plli in zip(rf_sw, led, pll):
-            self.comb += [
-                ledi[1].eq(~plli.muxout),
-                ledi[0].eq(rf_sw_i),
-                rf_sw_i.eq(1),
-            ]
-
         self.comb += platform.request("fsen").eq(1)
 
         self.eem = eem = []
@@ -226,82 +288,104 @@ class Mirny(Module):
             self.comb += eemi.oe.eq(tsi.oe)
             eem.append(tsi)
 
-        # AD9910 only
         self.clock_domains.cd_sys = ClockDomain("sys", reset_less=True)
-        self.clock_domains.cd_sck0 = ClockDomain("sck0", reset_less=True)
-        self.clock_domains.cd_sck1 = ClockDomain("sck1", reset_less=True)
-        self.clock_domains.cd_sel0 = ClockDomain("sel0", reset_less=True)
-        self.clock_domains.cd_sel1 = ClockDomain("sel1", reset_less=True)
+        self.clock_domains.cd_sck = ClockDomain("sck", reset_less=True)
+        self.clock_domains.cd_le = ClockDomain("le", reset_less=True)
 
         platform.add_period_constraint(eem[0]._pin, 8.)
         platform.add_period_constraint(eem[3]._pin, 8.)
 
-        self.specials += [
-            Instance("BUFG", i_I=eem[0].i, o_O=self.cd_sck1.clk),
-            Instance("FDPE", p_INIT=1,
-                i_D=0,
-                i_C=self.cd_sck1.clk,
-                i_CE=self.cd_sel1.clk,
-                i_PRE=~self.cd_sel1.clk,
-                o_Q=self.cd_sel0.clk),
-        ]
         self.comb += [
-            self.cd_sck0.clk.eq(~self.cd_sck1.clk),
-            self.cd_sys.clk.eq(self.cd_sck1.clk),
-            self.cd_sel1.clk.eq(~eem[3].i),
+            self.cd_sys.clk.eq(~self.cd_sck.clk),
+        ]
+
+        self.specials += [
+            Instance("BUFG", i_I=eem[0].i, o_O=self.cd_sck.clk),
+            Instance("FDPE", p_INIT=1, i_D=0,
+                     i_C=self.cd_sys.clk,
+                     i_CE=~eem[3].i,
+                     i_PRE=eem[3].i,
+                     o_Q=self.cd_le.clk),
         ]
 
         self.comb += [
             [eem[i].oe.eq(0) for i in range(8) if i not in (2,)],
             eem[2].oe.eq(1),
         ]
-        return
 
-        cfg = CFG(platform)
-        stat = Status(platform)
-        sr = SR(24)
-        assert len(cfg.data) <= len(sr.di)
-        assert len(stat.data) <= len(sr.do)
-        self.submodules += cfg, stat, sr
-
-        sel = Signal(8)
-        cs = Signal(3)
-        miso = Signal(8)
-        mosi = eem[1].i
-
-
+        self.submodules.sr = SR()
+        self.sync.sck += self.sr.ext.sdi.eq(eem[1].i)
+        self.sync.sys += eem[2].o.eq(self.sr.ext.sdo)
         self.comb += [
-                cfg.en_9910.eq(en_9910),
-                cs.eq(Cat(eem[3].i, eem[4].i, ~en_nu & eem[5].i)),
-                Array(sel)[cs].eq(1),  # one-hot
-                eem[2].o.eq(Array(miso)[cs]),
-                miso[3].eq(miso[4]),  # for all-DDS take DDS0:MISO
-
-                att.clk.eq(sel[2] & self.cd_sck1.clk),
-                att.s_in.eq(mosi),
-                miso[2].eq(att.s_out),
-
-                sr.sel.eq(sel[1]),
-                sr.sdi.eq(mosi),
-                miso[1].eq(sr.sdo),
-
-                cfg.data.raw_bits().eq(sr.di),
-                sr.do.eq(stat.data.raw_bits()),
+            self.sr.ext.sck.eq(self.cd_sck.clk),
+            self.sr.ext.cs.eq(~eem[3].i),
         ]
-        for i, ddsi in enumerate(dds):
-            sel_spi = Signal()
-            sel_nu = Signal()
+        mask = 0b0001111
+
+        regs = [STA(), CFG(), CFG(width=4), REG()]
+        self.submodules += regs
+        for i, reg in enumerate(regs):
+            self.sr.connect(reg.bus, adr=i, mask=mask)
+
+        clk = platform.request("clk")
+        clk_div = TSTriple()
+        self.specials += clk_div.get_tristate(clk.div)
+        # in_sel: 00: XO, 01: MMCX, 10: n/a (SMA+XO), 11: SMA
+        # dividers: 00(z): 1, 01(z): 1, 10(low): 2, 11(high) 4
+        self.comb += Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(
+            regs[1].cfg[8:])
+
+        for i, m in enumerate(platform.request("mezz_io")):
+            tsi = TSTriple()
+            self.specials += tsi.get_tristate(m)
             self.comb += [
-                    sel_spi.eq(sel[i + 4] | (sel[3] & cfg.data.mask_nu[i])),
-                    sel_nu.eq(en_nu & ~cfg.data.mask_nu[i]),
-                    ddsi.cs_n.eq(~Mux(sel_nu, eem[5].i, sel_spi)),
-                    ddsi.sck.eq(Mux(sel_nu, eem[2].i, self.cd_sck1.clk)),
-                    ddsi.sdi.eq(Mux(sel_nu, eem[i + 8].i, mosi)),
-                    miso[i + 4].eq(ddsi.sdo),
-                    ddsi.io_update.eq(Mux(cfg.data.mask_nu[i],
-                        cfg.data.io_update, eem[6].i)),
+                tsi.o.eq(regs[3].write[i]),
+                tsi.oe.eq(regs[3].write[i + 8]),
+                regs[3].read[i].eq(tsi.i),
+                regs[3].read[i + 8].eq(tsi.oe),
             ]
+
+        ifc_mode = platform.request("ifc_mode")
+        hw_rev = platform.request("hw_rev")
+        proto_rev = Signal(2, reset=__proto_rev__)
+        self.comb += regs[0].sta[8:].eq(Cat(ifc_mode, hw_rev, proto_rev))
+
+        for i in range(4):
+            pll = platform.request("pll", i)
+            rf_sw = platform.request("rf_sw", i)
+            self.comb += [
+                rf_sw.eq(regs[2].cfg[i] | eem[4 + i].i),
+                regs[0].sta[i].eq(rf_sw),
+                regs[0].sta[i + 4].eq(pll.muxout),
+            ]
+
+            led = platform.request("led", i)
+            self.comb += led.eq(Cat(rf_sw, ~pll.muxout))
+            att = platform.request("att", i)
+            ext = Record(ext_layout)
+            self.comb += [
+                pll.ce.eq(regs[1].cfg[i]),
+                pll.scki.eq(ext.sck),
+                pll.sdi.eq(ext.sdi),
+                ext.sdo.eq(pll.muxout),
+                pll.le.eq(ext.cs),
+            ]
+            self.sr.connect_ext(ext, adr=i + 4, mask=mask)
+            ext = Record(ext_layout)
+            self.comb += [
+                att.rstn.eq(regs[1].cfg[i + 4]),
+                att.clk.eq(ext.sck),
+                att.s_in.eq(ext.sdi),
+                ext.sdo.eq(att.s_out),
+                att.le.eq(ext.cs),
+            ]
+            self.sr.connect_ext(ext, adr=i + 8, mask=mask)
 
         tp = [platform.request("tp", i) for i in range(5)]
         self.comb += [
+            tp[0].eq(self.sr._slaves[-1][0].cs),
+            tp[1].eq(self.sr._slaves[-1][0].sck),
+            tp[2].eq(self.sr._slaves[-1][0].sdi),
+            tp[3].eq(self.sr._slaves[-1][0].sdo),
+            tp[4].eq(self.sr.bus.we),
         ]

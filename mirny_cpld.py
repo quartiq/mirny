@@ -6,8 +6,8 @@ _io = [
         ("tp", 0, Pins("P128")),
         ("tp", 1, Pins("P126")),
         ("tp", 2, Pins("P125")),
-        ("tp", 4, Pins("P124")),
-        ("tp", 5, Pins("P121")),
+        ("tp", 3, Pins("P124")),
+        ("tp", 4, Pins("P121")),
 
         ("ifc_mode", 0, Pins("P102 P103 P104 P105")),
 
