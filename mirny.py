@@ -162,26 +162,21 @@ def intersection(a, b):
 class Mirny(Module):
     """
     Mirny IO router and configuration/status
-    =========================================
+    ========================================
 
     Pin Out
     -------
 
-    | EEM LVDS pair | Function     |
-    |---------------+--------------|
-    | EEM 0         | SCLK         |
-    | EEM 1         | MOSI         |
-    | EEM 2         | MISO, MUXOUT |
-    | EEM 3         | CS           |
-    | EEM 4         | SW0          |
-    | EEM 5         | SW1          |
-    | EEM 6         | SW3          |
-    | EEM 7         | SW4          |
-
-    IFC_MODE
-    --------
-
-    all reserved
+    | EEM LVDS pair | Function               |
+    |---------------+------------------------|
+    | EEM 0         | SCLK                   |
+    | EEM 1         | MOSI                   |
+    | EEM 2         | MISO, MUXOUT           |
+    | EEM 3         | CS                     |
+    | EEM 4         | SW0, MUXOUT0, MEZZ_IO0 |
+    | EEM 5         | SW1, MUXOUT1, MEZZ_IO1 |
+    | EEM 6         | SW2, MUXOUT2, MEZZ_IO2 |
+    | EEM 7         | SW3, MUXOUT3, MEZZ_IO3 |
 
     SPI
     ---
