@@ -217,6 +217,7 @@ class Mirny(Module):
     | HW_REV    | 2     | HW rev                             |
     | PROTO_REV | 2     | Protocol (see __proto_rev__)       |
     | IFC_MODE  | 4     | IFC_MODE[0:4]                      |
+    | MUXOUT    | 4     | Muxout values                      |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -236,7 +237,6 @@ class Mirny(Module):
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
     | RF_SW     | 4     | RF switch state                    |
-    | MUXOUT    | 4     | Muxout values                      |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -283,7 +283,7 @@ class Mirny(Module):
 
         self.submodules.sr = SR()
         mask = 0b0001111
-        
+
         self.comb += [
             self.sr.ext.sck.eq(self.cd_sck.clk),
             self.sr.ext.sdi.eq(eem[1].i),
@@ -291,16 +291,20 @@ class Mirny(Module):
             self.sr.ext.cs.eq(eem[3].i),
         ]
 
-        regs = [REG(), REG(width=12), REG(), REG()]
+        regs = [REG(), REG(width=12), REG(width=4), REG()]
         self.submodules += regs
         for i, reg in enumerate(regs):
             self.sr.connect(reg.bus, adr=i, mask=mask)
 
-        self.comb += regs[0].read.eq(Cat(
-            platform.request("hw_rev"),
-            Constant(__proto_rev__, 2),
-            platform.request("ifc_mode"),
-        ))
+        self.comb += [
+            regs[0].read[:8].eq(Cat(
+                platform.request("hw_rev"),
+                Constant(__proto_rev__, 2),
+                platform.request("ifc_mode"),
+            )),
+            regs[1].read.eq(regs[1].write),
+            regs[2].read.eq(regs[2].write),
+        ]
 
         clk = platform.request("clk")
         clk_div = TSTriple()
@@ -310,7 +314,6 @@ class Mirny(Module):
         self.comb += [
             Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(regs[1].write[4:8]),
             platform.request("fsen").eq(~regs[1].write[9]),
-            regs[1].read.eq(regs[1].write)
         ]
 
         for i, m in enumerate(platform.request("mezz_io")):
@@ -319,8 +322,8 @@ class Mirny(Module):
             self.comb += [
                 tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
                     (regs[1].write[11] & eem[i + 4].i))),
-                tsi.oe.eq(regs[3].write[i + 8]),
                 regs[3].read[i].eq(tsi.i),
+                tsi.oe.eq(regs[3].write[i + 8]),
                 regs[3].read[i + 8].eq(tsi.oe),
             ]
 
@@ -340,7 +343,7 @@ class Mirny(Module):
                 pll.scki.eq(ext.sck),
                 pll.sdi.eq(ext.sdi),
                 ext.sdo.eq(pll.muxout),
-                regs[2].read[i].eq(pll.muxout),
+                regs[0].read[i + 8].eq(pll.muxout),
                 eem[4 + i].o.eq(pll.muxout),
                 pll.le.eq(~ext.cs),
             ]
