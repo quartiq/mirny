@@ -38,7 +38,7 @@ ext_layout = [
 ]
 
 
-class RW(Module):
+class REG(Module):
     def __init__(self, width=None, read=True, write=True):
         self.bus = Record(bus_layout)
         if width is None:
@@ -50,12 +50,6 @@ class RW(Module):
         if read:
             self.read = Signal(width)
             self.comb += self.bus.dat_r.eq(self.read)
-
-
-class REG(RW):
-    def __init__(self, width=None):
-        super().__init__(width, read=True, write=True)
-        self.comb += self.read.eq(self.write)
 
 
 # R,F edges happen left in each column
@@ -144,13 +138,14 @@ class SR(Module):
         adr &= mask
         self._check_intersection(adr, mask)
         self._slaves.append((ext, adr, mask))
-        stb = AsyncRst(1)
+        stb = AsyncRst()
         self.submodules += stb
         self.comb += [
             stb.i.eq(self.bus.adr & mask == adr),
             stb.ce.eq(self.bus.re),
-            ext.sck.eq(self.ext.sck),  # do not glitch with stb.o
-            ext.sdi.eq(self.ext.sdi),
+            # don't glitch with &stb.o
+            ext.sck.eq(self.ext.sck),
+            ext.sdi.eq(self.ext.sdi & stb.o),
             ext.cs.eq(stb.o),
             If(stb.o,
                 self.ext.sdo.eq(ext.sdo),
@@ -207,26 +202,26 @@ class Mirny(Module):
     | 9 | ATT1     |
     | a | ATT2     |
     | b | ATT3     |
-    | c | (reserved) all PLL  |
-    | d | (reserved) all ATT  |
-    | e | (reserved) MEZZ     |
+    | c | reserved |
+    | d | reserved |
+    | e | reserved |
     | f | reserved |
 
     The SPI interface is CPOL=0, CPHA=0, SPI mode 0, 4-wire, full fuplex.
 
     Configuration register
 
-    The configuration registers is updated at last falling SCK edge of the SPI
-    transaction. The initial state is 0 (all bits cleared).
-    The bits in the configuration registers (from LSB to MSB) are:
+    The status bits are read on the falling edge of after the WE bit (8th
+    falling edge).
+    The configuration bits are updated at the last falling SCK edge of the SPI
+    transaction (24th falling edge). The initial state is 0 (all bits cleared).
+    The bits in the registers (from LSB to MSB) are:
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
-    | MUXOUT    | 4     | Muxout values                      |
-    | IFC_MODE  | 4     | IFC_MODE[0:3]                      |
-    |           | 2     | reserved                           |
     | HW_REV    | 2     | HW rev                             |
-    | PROTO_REV | 4     | Protocol (see __proto_rev__)       |
+    | PROTO_REV | 2     | Protocol (see __proto_rev__)       |
+    | IFC_MODE  | 4     | IFC_MODE[0:4]                      |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -240,12 +235,13 @@ class Mirny(Module):
     |           |       | 3: divide-by-four                  |
     | ATT_RST   | 1     | Attenuator reset                   |
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
-    | MUXOUT_EEM| 1     | route muxout to EEM[4:7]           |
-    |           | 1     | reserved                           |
+    | MUXOUT_EEM| 1     | route MUXOUT to EEM[4:8]           |
+    | EEM_MEZZIO| 1     | route EEM[4:8] to MEZZ_IO[0:4]     |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
     | RF_SW     | 4     | RF switch state                    |
+    | MUXOUT    | 4     | Muxout values                      |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -291,54 +287,53 @@ class Mirny(Module):
         ]
 
         self.submodules.sr = SR()
+        mask = 0b0001111
+        
         self.comb += [
             self.sr.ext.sck.eq(self.cd_sck.clk),
             self.sr.ext.sdi.eq(eem[1].i),
             eem[2].o.eq(self.sr.ext.sdo),
             self.sr.ext.cs.eq(eem[3].i),
         ]
-        mask = 0b0001111
 
-        regs = [
-            RW(width=16),
-            REG(width=12),
-            RW(width=4),
-            RW(width=16)
-        ]
+        regs = [REG(), REG(width=12), REG(), REG()]
         self.submodules += regs
         for i, reg in enumerate(regs):
             self.sr.connect(reg.bus, adr=i, mask=mask)
+
+        self.comb += regs[0].read.eq(Cat(
+            platform.request("hw_rev"),
+            Constant(__proto_rev__, 2),
+            platform.request("ifc_mode"),
+        ))
 
         clk = platform.request("clk")
         clk_div = TSTriple()
         self.specials += clk_div.get_tristate(clk.div)
         # in_sel: 00: XO, 01: MMCX, 10: n/a (SMA+XO), 11: SMA
         # dividers: 00(z): 1, 01(z): 1, 10(low): 2, 11(high) 4
-        self.comb += Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(
-            regs[1].write[4:8])
+        self.comb += [
+            Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(regs[1].write[4:8]),
+            platform.request("fsen").eq(~regs[1].write[9]),
+            regs[1].read.eq(regs[1].write)
+        ]
 
         for i, m in enumerate(platform.request("mezz_io")):
             tsi = TSTriple()
             self.specials += tsi.get_tristate(m)
             self.comb += [
-                tsi.o.eq(regs[3].write[i]),
+                tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
+                    (regs[1].write[11] & eem[i + 4].i))),
                 tsi.oe.eq(regs[3].write[i + 8]),
                 regs[3].read[i].eq(tsi.i),
                 regs[3].read[i + 8].eq(tsi.oe),
             ]
 
-        self.comb += platform.request("fsen").eq(~regs[1].write[9])
-
-        ifc_mode = platform.request("ifc_mode")
-        hw_rev = platform.request("hw_rev")
-        self.comb += regs[0].read[4:].eq(
-            Cat(ifc_mode, Constant(0, 2), hw_rev, Constant(__proto_rev__, 4)))
-
         for i in range(4):
             rf_sw = platform.request("rf_sw", i)
             self.comb += [
-                rf_sw.eq(regs[2].write[i] | eem[4 + i].i),
-                regs[2].read[i].eq(rf_sw),
+                rf_sw.eq(regs[2].write[i] | (
+                    ~regs[1].write[11] & ~regs[1].write[10] & eem[4 + i].i)),
                 eem[4 + i].oe.eq(regs[1].write[10]),
             ]
 
@@ -350,15 +345,13 @@ class Mirny(Module):
                 pll.scki.eq(ext.sck),
                 pll.sdi.eq(ext.sdi),
                 ext.sdo.eq(pll.muxout),
+                regs[2].read[i].eq(pll.muxout),
+                eem[4 + i].o.eq(pll.muxout),
                 pll.le.eq(~ext.cs),
             ]
 
-            led = platform.request("led", i)
-            self.comb += [
-                led.eq(Cat(rf_sw, ~pll.muxout)),
-                regs[0].read[i].eq(pll.muxout),
-                eem[4 + i].o.eq(pll.muxout),
-            ]
+            self.comb += platform.request("led", i).eq(
+                Cat(rf_sw, ~pll.muxout & ~regs[1].write[10]))
 
             att = platform.request("att", i)
             ext = Record(ext_layout)
