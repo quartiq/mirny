@@ -66,14 +66,12 @@ class REG(RW):
 # CLK   _RFRFRFRFRF_
 #fMOSI  AABBWW0011
 #rSDI    AABBWW0011
-#fSTB           11
+#fWE            WW
 #fRE        11
 #fSDO         0011
 #fMISO        0011
-#fN     443322110044
-#fP     111100000011
-# NSRA  0011
-# NSRD      001122
+#fN A   332211000003
+#fN D   222222221102
 #
 # default: falling
 # MOSI->SDI: rising
@@ -84,17 +82,16 @@ class SR(Module):
         self.ext = Record(ext_layout)
 
         self._slaves = []
-        width = len(self.bus.dat_w) + len(self.bus.adr) + 1
-        sr_adr = Signal(1 + len(self.bus.adr), reset_less=True)
-        sr_dat = Signal(len(self.bus.dat_w), reset_less=True)
-        sr_dat_next = Signal(len(sr_dat))
-        # bits to be transferred - 1
-        n_adr = AsyncRst(None, max=len(sr_adr), reset=-1)
-        n_dat = AsyncRst(None, max=len(sr_dat), reset=-1)
-        self.submodules += n_adr, n_dat
-        re = Signal()
-        stb = Signal()
+        
         sdi = Signal(reset_less=True)
+        sr_adr = Signal(len(self.bus.adr), reset_less=True)
+        sr_dat = Signal(len(self.bus.dat_w), reset_less=True)
+        we = Signal(reset_less=True)
+
+        # bits to be transferred - 1
+        n_adr = AsyncRst(None, max=len(sr_adr) + 2, reset=len(sr_adr))
+        n_dat = AsyncRst(None, max=len(sr_dat) + 1, reset=len(sr_dat))
+        self.submodules += n_adr, n_dat
 
         self.comb += [
             n_adr.i.eq(n_adr.o - 1),
@@ -102,24 +99,24 @@ class SR(Module):
             n_dat.i.eq(n_dat.o - 1),
             n_dat.ce.eq(~n_adr.ce & (n_dat.o != 0)),
 
-            sr_dat_next.eq(Cat(sdi, sr_dat)),
             self.ext.sdo.eq(sr_dat[-1]),
 
-            self.bus.adr.eq(sr_adr[1:]),
-            self.bus.dat_w.eq(sr_dat_next),
-            self.bus.we.eq(n_dat.ce & sr_adr[0]),
+            self.bus.adr.eq(sr_adr),
+            self.bus.dat_w.eq(Cat(sdi, sr_dat)),
+            self.bus.we.eq((n_dat.o == 1) & we),
             self.bus.re.eq(n_adr.o == 1)
         ]
         self.sync.sck += sdi.eq(self.ext.sdi)
         self.sync += [
-            If(n_adr.ce,
+            If(n_adr.ce & ~self.bus.re,
                 sr_adr.eq(Cat(sdi, sr_adr)),
             ),
             If(self.bus.re,
+                we.eq(sdi),
                 sr_dat.eq(self.bus.dat_r),
             ),
             If(n_dat.ce,
-                sr_dat.eq(sr_dat_next),
+                sr_dat.eq(self.bus.dat_w),
             ),
         ]
 
@@ -245,7 +242,8 @@ class Mirny(Module):
     |           |       | 3: divide-by-four                  |
     | ATT_RST   | 1     | Attenuator reset                   |
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
-    |           | 2     | reserved                           |
+    | MUXOUT_EEM| 1     | route muxout to EEM[4:7]           |
+    |           | 1     | reserved                           |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -343,6 +341,7 @@ class Mirny(Module):
             self.comb += [
                 rf_sw.eq(regs[2].write[i] | eem[4 + i].i),
                 regs[2].read[i].eq(rf_sw),
+                eem[4 + i].oe.eq(regs[1].write[10]),
             ]
 
             pll = platform.request("pll", i)
@@ -360,6 +359,7 @@ class Mirny(Module):
             self.comb += [
                 led.eq(Cat(rf_sw, ~pll.muxout)),
                 regs[0].read[i].eq(pll.muxout),
+                eem[4 + i].o.eq(pll.muxout),
             ]
 
             att = platform.request("att", i)
