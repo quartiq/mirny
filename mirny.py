@@ -6,7 +6,7 @@ __proto_rev__ = 0
 
 
 class AsyncRst(Module):
-    def __init__(self, width=1, cd="sys", reset=0, **kwargs):
+    def __init__(self, width=None, cd="sys", reset=0, **kwargs):
         self.i = Signal(width, reset=reset, **kwargs)
         self.o = Signal(width, **kwargs)
         self.ce = Signal(reset=1)
@@ -70,6 +70,7 @@ class REG(RW):
 #fRE        11
 #fSDO         0011
 #fMISO        0011
+#fN     443322110004
 #fN A   332211000003
 #fN D   222222221102
 #
@@ -82,42 +83,39 @@ class SR(Module):
         self.ext = Record(ext_layout)
 
         self._slaves = []
-        
+
         sdi = Signal(reset_less=True)
         sr_adr = Signal(len(self.bus.adr), reset_less=True)
         sr_dat = Signal(len(self.bus.dat_w), reset_less=True)
         we = Signal(reset_less=True)
 
         # bits to be transferred - 1
-        n_adr = AsyncRst(None, max=len(sr_adr) + 2, reset=len(sr_adr))
-        n_dat = AsyncRst(None, max=len(sr_dat) + 1, reset=len(sr_dat))
-        self.submodules += n_adr, n_dat
+        n = AsyncRst(max=len(sr_adr) + 1 + len(sr_dat), reset=-1)
+        p = AsyncRst()
+        self.submodules += n, p
 
         self.comb += [
-            n_adr.i.eq(n_adr.o - 1),
-            n_adr.ce.eq(n_adr.o != 0),
-            n_dat.i.eq(n_dat.o - 1),
-            n_dat.ce.eq(~n_adr.ce & (n_dat.o != 0)),
+            n.i.eq(n.o - 1),
+            n.ce.eq(n.o != 0),
+            p.i.eq(1),
+            p.ce.eq(self.bus.re),
 
             self.ext.sdo.eq(sr_dat[-1]),
 
             self.bus.adr.eq(sr_adr),
             self.bus.dat_w.eq(Cat(sdi, sr_dat)),
-            self.bus.we.eq((n_dat.o == 1) & we),
-            self.bus.re.eq(n_adr.o == 1)
+            self.bus.re.eq(n.o == len(sr_dat)),
+            self.bus.we.eq(~n.ce & we),
         ]
         self.sync.sck += sdi.eq(self.ext.sdi)
         self.sync += [
-            If(n_adr.ce & ~self.bus.re,
-                sr_adr.eq(Cat(sdi, sr_adr)),
-            ),
+            sr_dat.eq(self.bus.dat_w),
             If(self.bus.re,
                 we.eq(sdi),
                 sr_dat.eq(self.bus.dat_r),
-            ),
-            If(n_dat.ce,
-                sr_dat.eq(self.bus.dat_w),
-            ),
+            ).Elif(~p.o,
+                sr_adr.eq(Cat(sdi, sr_adr)),
+            )
         ]
 
     def _check_intersection(self, adr, mask):
