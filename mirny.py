@@ -83,8 +83,9 @@ class SR(Module):
         sr_dat = Signal(len(self.bus.dat_w), reset_less=True)
         we = Signal(reset_less=True)
 
+        width = len(sr_adr) + 1 + len(sr_dat)
         # bits to be transferred - 1
-        n = AsyncRst(max=len(sr_adr) + 1 + len(sr_dat), reset=-1)
+        n = AsyncRst(max=width, reset=width - 1)
         p = AsyncRst()
         self.submodules += n, p
 
@@ -92,19 +93,19 @@ class SR(Module):
             n.i.eq(n.o - 1),
             n.ce.eq(n.o != 0),
             p.i.eq(1),
-            p.ce.eq(self.bus.re),
+            p.ce.eq(n.o == len(sr_dat)),
 
             self.ext.sdo.eq(sr_dat[-1]),
 
             self.bus.adr.eq(sr_adr),
             self.bus.dat_w.eq(Cat(sdi, sr_dat)),
-            self.bus.re.eq(n.o == len(sr_dat)),
+            self.bus.re.eq(p.ce),
             self.bus.we.eq(~n.ce & we),
         ]
         self.sync.sck += sdi.eq(self.ext.sdi)
         self.sync += [
             sr_dat.eq(self.bus.dat_w),
-            If(self.bus.re,
+            If(p.ce,
                 we.eq(sdi),
                 sr_dat.eq(self.bus.dat_r),
             ).Elif(~p.o,
