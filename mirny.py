@@ -365,9 +365,9 @@ class Mirny(Module):
 
         tp = [platform.request("tp", i) for i in range(5)]
         self.comb += [
-            tp[0].eq(self.sr._slaves[4][0].cs),
-            tp[1].eq(self.sr._slaves[4][0].sck),
-            tp[2].eq(self.sr._slaves[4][0].sdi),
+            tp[0].eq(self.sr.ext.sck),
+            tp[1].eq(eem[1].i),
+            tp[2].eq(eem[2].i),
             tp[3].eq(self.sr.bus.re),
             tp[4].eq(self.sr.bus.we),
         ]
