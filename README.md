@@ -1,6 +1,8 @@
-# Mirny CPLD code
+# Mirny CPLD gateware
 
-[Mirny overview](https://github.com/sinara-hw/mirny/wiki)
+## Hardware
+
+[![Hardware](https://github.com/sinara-hw/mirny/wiki/Mirny_v1.0_top_small.jpg)](https://github.com/sinara-hw/mirny/wiki)
 
 [Mirny Schematics](https://github.com/sinara-hw/mirny/releases)
 
