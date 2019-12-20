@@ -8,7 +8,7 @@
 
 ## Building
 
-Needs migen and ISE.
+Needs [migen](https://github.com/m-labs/migen) and [Xilinx ISE](https://www.xilinx.com/products/design-tools/ise-design-suite.html).
 
 ```
 make
