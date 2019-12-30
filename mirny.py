@@ -223,8 +223,8 @@ class Mirny(Module):
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
     | CE_N      | 4     | PLL chip enable (bar)              |
-    | CLK_SEL   | 2     | Selects CLK source: 0 OSC, 1 MMCX, |
-    |           |       | 2 reserved, 3 SMA                  |
+    | CLK_SEL   | 2     | Selects CLK source:                |
+    |           |       | 0 OSC, 1 reserved, 2 MMCX, 3 SMA   |
     | DIV       | 2     | Clock divider configuration:       |
     |           |       | 0: divide-by-one,                  |
     |           |       | 1: reserved,                       |
