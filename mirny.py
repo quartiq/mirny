@@ -223,8 +223,8 @@ class Mirny(Module):
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
     | CE_N      | 4     | PLL chip enable (bar)              |
-    | CLK_SEL   | 2     | Selects CLK source: 0 OSC, 1 MMCX, |
-    |           |       | 2 reserved, 3 SMA                  |
+    | CLK_SEL   | 2     | Selects CLK source:                |
+    |           |       | 0 OSC, 1 reserved, 2 MMCX, 3 SMA   |
     | DIV       | 2     | Clock divider configuration:       |
     |           |       | 0: divide-by-one,                  |
     |           |       | 1: reserved,                       |
@@ -310,7 +310,7 @@ class Mirny(Module):
         clk = platform.request("clk")
         clk_div = TSTriple()
         self.specials += clk_div.get_tristate(clk.div)
-        # in_sel: 00: XO, 01: MMCX, 10: n/a (SMA+XO), 11: SMA
+        # in_sel: 00: XO, 01: n/a (SMA+XO), 10: MMXC, 11: SMA
         # dividers: 00(z): 1, 01(z): 1, 10(low): 2, 11(high) 4
         self.comb += [
             Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(regs[1].write[4:8]),
