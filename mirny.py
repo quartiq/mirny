@@ -310,7 +310,7 @@ class Mirny(Module):
         clk = platform.request("clk")
         clk_div = TSTriple()
         self.specials += clk_div.get_tristate(clk.div)
-        # in_sel: 00: XO, 01: MMCX, 10: n/a (SMA+XO), 11: SMA
+        # in_sel: 00: XO, 01: n/a (SMA+XO), 10: MMXC, 11: SMA
         # dividers: 00(z): 1, 01(z): 1, 10(low): 2, 11(high) 4
         self.comb += [
             Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(regs[1].write[4:8]),
