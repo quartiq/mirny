@@ -174,10 +174,10 @@ class Mirny(Module):
     | EEM 1         | MOSI                   |
     | EEM 2         | MISO, MUXOUT           |
     | EEM 3         | CS                     |
-    | EEM 4         | SW0, MUXOUT0, MEZZ_IO0 |
-    | EEM 5         | SW1, MUXOUT1, MEZZ_IO1 |
-    | EEM 6         | SW2, MUXOUT2, MEZZ_IO2 |
-    | EEM 7         | SW3, MUXOUT3, MEZZ_IO3 |
+    | EEM 4         | SW0, MUXOUT0           |
+    | EEM 5         | SW1, MUXOUT1           |
+    | EEM 6         | SW2, MUXOUT2           |
+    | EEM 7         | SW3, MUXOUT3           |
 
     SPI
     ---
@@ -233,7 +233,7 @@ class Mirny(Module):
     | ATT_RST   | 1     | Attenuator reset                   |
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
     | MUXOUT_EEM| 1     | route MUXOUT to EEM[4:8]           |
-    | EEM_MEZZIO| 1     | route EEM[4:8] to MEZZ_IO[0:4]     |
+    |           | 1     | reserved                           |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -310,7 +310,7 @@ class Mirny(Module):
         clk = platform.request("clk")
         clk_div = TSTriple()
         self.specials += clk_div.get_tristate(clk.div)
-        # in_sel: 00: XO, 01: n/a (SMA+XO), 10: MMXC, 11: SMA
+        # in_sel: 00: XO, 01: n/a (SMA+XO), 10: MMCX, 11: SMA
         # dividers: 00(z): 1, 01(z): 1, 10(low): 2, 11(high) 4
         self.comb += [
             Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(regs[1].write[4:8]),
@@ -321,12 +321,16 @@ class Mirny(Module):
             tsi = TSTriple()
             self.specials += tsi.get_tristate(m)
             self.comb += [
-                tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
-                    (regs[1].write[11] & eem[i + 4].i))),
+                tsi.o.eq(regs[3].write[i]),
                 regs[3].read[i].eq(tsi.i),
                 tsi.oe.eq(regs[3].write[i + 8]),
                 regs[3].read[i + 8].eq(tsi.oe),
             ]
+
+        # set remaining Almazny shift register NOE to 0 at all times
+        for pin in platform.request("almazny_noe"):
+            x = Signal()
+            self.comb += [ x.eq(0), pin.eq(x) ]
 
         for i in range(4):
             rf_sw = platform.request("rf_sw", i)
