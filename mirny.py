@@ -174,10 +174,10 @@ class Mirny(Module):
     | EEM 1         | MOSI                   |
     | EEM 2         | MISO, MUXOUT           |
     | EEM 3         | CS                     |
-    | EEM 4         | SW0, MUXOUT0           |
-    | EEM 5         | SW1, MUXOUT1           |
-    | EEM 6         | SW2, MUXOUT2           |
-    | EEM 7         | SW3, MUXOUT3           |
+    | EEM 4         | SW0, MUXOUT0, MEZZ_IO8 |
+    | EEM 5         | SW1, MUXOUT1, MEZZ_IO11|
+    | EEM 6         | SW2, MUXOUT2, MEZZ_IO10|
+    | EEM 7         | SW3, MUXOUT3, MEZZ_IO13|
 
     SPI
     ---
@@ -233,7 +233,7 @@ class Mirny(Module):
     | ATT_RST   | 1     | Attenuator reset                   |
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
     | MUXOUT_EEM| 1     | route MUXOUT to EEM[4:8]           |
-    |           | 1     | reserved                           |
+    | EEM_MEZZIO| 1     | route EEM[4:8] to MEZZ_IO[0:4]     | (not available in legacy-almazny variant)
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -250,7 +250,7 @@ class Mirny(Module):
     The test points expose miscellaneous signals for debugging and are not part
     of the protocol revision.
     """
-    def __init__(self, platform):
+    def __init__(self, platform, legacy_almazny=False):
         self.eem = eem = []
         for i in range(8):
             tsi = TSTriple()
@@ -317,20 +317,52 @@ class Mirny(Module):
             platform.request("fsen").eq(~regs[1].write[9]),
         ]
 
-        for i, m in enumerate(platform.request("mezz_io")):
-            tsi = TSTriple()
-            self.specials += tsi.get_tristate(m)
-            self.comb += [
-                tsi.o.eq(regs[3].write[i]),
-                regs[3].read[i].eq(tsi.i),
-                tsi.oe.eq(regs[3].write[i + 8]),
-                regs[3].read[i + 8].eq(tsi.oe),
-            ]
+        if legacy_almazny:
+            # 6 signals
+            for i, m in enumerate(platform.request("almazny_io")):
+                tsi = TSTriple()
+                self.specials += tsi.get_tristate(m)
+                self.comb += [
+                    tsi.o.eq(regs[3].write[i]),
+                    regs[3].read[i].eq(tsi.i),
+                    tsi.oe.eq(regs[3].write[i + 8]),
+                    regs[3].read[i + 8].eq(tsi.oe),
+                ]
+            # 7th, connecting all NOEs
+            for pin in platform.request("almazny_noe"):
+                # invert the signal for OE#
+                tsi = TSTriple()
+                self.specials += tsi.get_tristate(pin)
+                self.comb += [ 
+                    tsi.o.eq(~regs[3].write[6]),
+                    regs[3].read[6].eq(tsi.i),
+                    tsi.oe.eq(regs[3].write[6 + 8]),
+                    regs[3].read[6 + 8].eq(tsi.oe),
+                ]
 
-        # set remaining Almazny shift register NOE to 0 at all times
-        for pin in platform.request("almazny_noe"):
-            x = Signal()
-            self.comb += [ x.eq(0), pin.eq(x) ]
+            # hardcode SRCLR#
+            srclr = platform.request("almazny_srclr")
+            srclr.eq(1)
+        else:
+            for i, m in enumerate(platform.request("mezz_io")):
+                tsi = TSTriple()
+                self.specials += tsi.get_tristate(m)
+                self.comb += [
+                    tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
+                        (regs[1].write[11] & eem[i + 4].i))),
+                    regs[3].read[i].eq(tsi.i),
+                    tsi.oe.eq(regs[3].write[i + 8]),
+                    regs[3].read[i + 8].eq(tsi.oe),
+                ]
+
+        tp = [platform.request("tp", i) for i in range(5)]
+        self.comb += [
+            tp[0].eq(self.sr.ext.sck),
+            tp[1].eq(eem[1].i),
+            tp[2].eq(eem[2].i),
+            tp[3].eq(self.sr.bus.re),
+            tp[4].eq(self.sr.bus.we),
+        ]
 
         for i in range(4):
             rf_sw = platform.request("rf_sw", i)
@@ -366,12 +398,3 @@ class Mirny(Module):
                 ext.sdo.eq(att.s_out),
                 att.le.eq(~ext.cs),
             ]
-
-        tp = [platform.request("tp", i) for i in range(5)]
-        self.comb += [
-            tp[0].eq(self.sr.ext.sck),
-            tp[1].eq(eem[1].i),
-            tp[2].eq(eem[2].i),
-            tp[3].eq(self.sr.bus.re),
-            tp[4].eq(self.sr.bus.we),
-        ]

@@ -11,6 +11,10 @@ build: build/mirny.vm6
 build/mirny.vm6: mirny.py mirny_cpld.py
 	python mirny_impl.py
 
+.PHONY: legacy-almazny
+legacy-almazny: mirny.py mirny_cpld.py
+	python mirny_impl.py --legacy-almazny
+
 REV:=$(shell git describe --always --abbrev=8 --dirty)
 
 .PHONY: release
