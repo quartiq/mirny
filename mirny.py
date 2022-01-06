@@ -153,6 +153,40 @@ class SR(Module):
             ),
         ]
 
+    def connect_almazny_passthrough(self, pt, adr, mask):
+        # for use w/ almazny
+        self._check_intersection(adr, mask)
+        self._slaves.append((pt, adr, mask))
+        stb = AsyncRst()
+        self.submodules += stb
+
+        saved_adr = Signal(2)
+        latch_signal = Signal()
+
+        self.comb += [
+            stb.i.eq(((self.bus.adr & adr) == adr) & (self.ext.cs)),
+            stb.ce.eq(self.bus.re),
+            pt.mosi.eq(self.ext.sdi & stb.o),
+            pt.clk.eq(self.ext.sck & stb.o),
+            # simple solution - latch after writing is done
+            latch_signal.eq(~stb.o),
+        ]
+
+        # update saved address when we write to almazny
+        self.sync += [
+            If(stb.o == 1,
+                saved_adr.eq(self.bus.adr[:2]),
+            )
+        ]
+
+        # latch can stay up indefinitely, it's only rising edge that counts
+        self.comb += [
+            pt.lt1.eq((saved_adr == 0) & latch_signal),
+            pt.lt2.eq((saved_adr == 1) & latch_signal),
+            pt.lt3.eq((saved_adr == 2) & latch_signal),
+            pt.lt4.eq((saved_adr == 3) & latch_signal),
+        ]
+
 
 def intersection(a, b):
     (aa, am), (ba, bm) = a, b
@@ -182,26 +216,26 @@ class Mirny(Module):
     SPI
     ---
 
-    SPI xfer is ADR(7), WE(1), DAT(REG: 16, ATT: 8, PLL: 32)
+    SPI xfer is ADR(7), WE(1), DAT(REG: 16, ATT: 8, PLL: 32, SR: 8)
 
-    | ADR | TARGET |
-    |--------+--------|
-    | 0 | REG0     |
-    | 1 | REG1     |
-    | 2 | REG2     |
-    | 3 | REG3     |
-    | 4 | PLL0     |
-    | 5 | PLL1     |
-    | 6 | PLL2     |
-    | 7 | PLL3     |
-    | 8 | ATT0     |
-    | 9 | ATT1     |
-    | a | ATT2     |
-    | b | ATT3     |
-    | c | reserved |
-    | d | reserved |
-    | e | reserved |
-    | f | reserved |
+    | ADR | TARGET        |
+    |-----+---------------|
+    | 0   | REG0          |
+    | 1   | REG1          |
+    | 2   | REG2          |
+    | 3   | REG3          |
+    | 4   | PLL0          |
+    | 5   | PLL1          |
+    | 6   | PLL2          |
+    | 7   | PLL3          |
+    | 8   | ATT0          |
+    | 9   | ATT1          |
+    | a   | ATT2          |
+    | b   | ATT3          |
+    | c   | (Almazny) SR1 |
+    | d   | (Almazny) SR2 |
+    | e   | (Almazny) SR3 |
+    | f   | (Almazny) SR4 |
 
     The SPI interface is CPOL=0, CPHA=0, SPI mode 0, 4-wire, full fuplex.
 
@@ -234,6 +268,7 @@ class Mirny(Module):
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
     | MUXOUT_EEM| 1     | route MUXOUT to EEM[4:8]           |
     | EEM_MEZZIO| 1     | route EEM[4:8] to MEZZ_IO[0:4]     |
+    | ALMAZNY_OE| 1     | Almazny OE in legacy almazny mode  |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
@@ -250,7 +285,7 @@ class Mirny(Module):
     The test points expose miscellaneous signals for debugging and are not part
     of the protocol revision.
     """
-    def __init__(self, platform):
+    def __init__(self, platform, legacy_almazny=False):
         self.eem = eem = []
         for i in range(8):
             tsi = TSTriple()
@@ -292,7 +327,7 @@ class Mirny(Module):
             self.sr.ext.cs.eq(eem[3].i),
         ]
 
-        regs = [REG(), REG(width=12), REG(width=4), REG()]
+        regs = [REG(), REG(width=13), REG(width=4), REG()]
         self.submodules += regs
         for i, reg in enumerate(regs):
             self.sr.connect(reg.bus, adr=i, mask=mask)
@@ -310,23 +345,44 @@ class Mirny(Module):
         clk = platform.request("clk")
         clk_div = TSTriple()
         self.specials += clk_div.get_tristate(clk.div)
-        # in_sel: 00: XO, 01: n/a (SMA+XO), 10: MMXC, 11: SMA
+        # in_sel: 00: XO, 01: n/a (SMA+XO), 10: MMCX, 11: SMA
         # dividers: 00(z): 1, 01(z): 1, 10(low): 2, 11(high) 4
         self.comb += [
             Cat(clk.in_sel, clk_div.o, clk_div.oe).eq(regs[1].write[4:8]),
             platform.request("fsen").eq(~regs[1].write[9]),
         ]
 
-        for i, m in enumerate(platform.request("mezz_io")):
-            tsi = TSTriple()
-            self.specials += tsi.get_tristate(m)
-            self.comb += [
-                tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
-                    (regs[1].write[11] & eem[i + 4].i))),
-                regs[3].read[i].eq(tsi.i),
-                tsi.oe.eq(regs[3].write[i + 8]),
-                regs[3].read[i + 8].eq(tsi.oe),
-            ]
+        if legacy_almazny:
+            # 6 signals
+            almazny_io = platform.request("almazny_io")
+            almazny_adr = 0b1100  # 1100 - and then 1101, 1110, 1111 for sr 1-4
+            almazny_mask = 0b0011
+            self.sr.connect_almazny_passthrough(almazny_io, almazny_adr, almazny_mask)
+
+            # 7th, connecting all NOEs
+            for i in range(4):
+                pin = platform.request("almazny_noe", i)
+                tsi = TSTriple()
+                self.specials += tsi.get_tristate(pin)
+                self.comb += [ 
+                    tsi.o.eq(~regs[1].write[12]),
+                    tsi.oe.eq(1)
+                ]
+
+            # hardcode SRCLR#
+            srclr = platform.request("almazny_srclr")
+            self.comb += srclr.eq(1)
+        else:
+            for i, m in enumerate(platform.request("mezz_io")):
+                tsi = TSTriple()
+                self.specials += tsi.get_tristate(m)
+                self.comb += [
+                    tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
+                        (regs[1].write[11] & eem[i + 4].i))),
+                    regs[3].read[i].eq(tsi.i),
+                    tsi.oe.eq(regs[3].write[i + 8]),
+                    regs[3].read[i + 8].eq(tsi.oe),
+                ]
 
         for i in range(4):
             rf_sw = platform.request("rf_sw", i)

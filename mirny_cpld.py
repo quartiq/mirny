@@ -16,8 +16,26 @@ _io = [
         # fail save LVDS enable, LVDS mode selection
         # high: type 2 receiver, failsafe low
         ("fsen", 0, Pins("P80")),
-
+        
+        # IO from 0 to 7
         ("mezz_io", 0, Pins("P57 P58 P59 P60 P61 P64 P68 P69")),
+
+        # legacy Almazny pins
+        ("almazny_io", 0, 
+            Subsignal("mosi", Pins("P94")),
+            Subsignal("clk", Pins("P97")),
+            Subsignal("lt1", Pins("P96")),
+            Subsignal("lt2", Pins("P100")),
+            Subsignal("lt3", Pins("P92")),
+            Subsignal("lt4", Pins("P57")),
+        ),
+
+        ("almazny_noe", 0, Pins("P95")),
+        ("almazny_noe", 1, Pins("P98")),
+        ("almazny_noe", 2, Pins("P101")),
+        ("almazny_noe", 3, Pins("P58")),
+
+        ("almazny_srclr", 0, Pins("P60")),
 
         ("clk", 0,
             Subsignal("div", Pins("P53")),

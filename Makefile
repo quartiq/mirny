@@ -8,8 +8,14 @@ test:
 .PHONY: build
 build: build/mirny.vm6
 
+.PHONY: legacy_almazny
+legacy_almazny: build/mirny_legacy_almazny.vm6
+
 build/mirny.vm6: mirny.py mirny_cpld.py
 	python mirny_impl.py
+
+build/mirny_legacy_almazny.vm6: mirny.py mirny_cpld.py
+	python mirny_impl.py --legacy-almazny
 
 REV:=$(shell git describe --always --abbrev=8 --dirty)
 
