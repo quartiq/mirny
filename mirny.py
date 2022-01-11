@@ -353,21 +353,14 @@ class Mirny(Module):
         ]
 
         if legacy_almazny:
-            # 6 signals
             almazny_io = platform.request("legacy_almazny_io")
             almazny_adr = 0b1100  # 1100 - and then 1101, 1110, 1111 for sr 1-4
             almazny_mask = 0b0011
             self.sr.connect_almazny_passthrough(almazny_io, almazny_adr, almazny_mask)
 
-            # 7th, connecting all NOEs
             for i in range(4):
                 pin = platform.request("legacy_almazny_noe", i)
-                tsi = TSTriple()
-                self.specials += tsi.get_tristate(pin)
-                self.comb += [ 
-                    tsi.o.eq(~regs[1].write[12]),
-                    tsi.oe.eq(1)
-                ]
+                self.comb += pin.eq(~regs[1].write[12])
 
             # hardcode SRCLR#
             srclr = platform.request("legacy_almazny_srclr")
