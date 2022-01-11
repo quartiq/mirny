@@ -153,10 +153,10 @@ class SR(Module):
             ),
         ]
 
-    def connect_almazny_passthrough(self, pt, adr, mask):
+    def connect_almazny_passthrough(self, almazny, adr, mask):
         # for use w/ almazny
         self._check_intersection(adr, mask)
-        self._slaves.append((pt, adr, mask))
+        self._slaves.append((almazny, adr, mask))
         stb = AsyncRst()
         self.submodules += stb
 
@@ -166,8 +166,8 @@ class SR(Module):
         self.comb += [
             stb.i.eq(((self.bus.adr & adr) == adr) & (self.ext.cs)),
             stb.ce.eq(self.bus.re),
-            pt.mosi.eq(self.ext.sdi & stb.o),
-            pt.clk.eq(self.ext.sck & stb.o),
+            almazny.mosi.eq(self.ext.sdi & stb.o),
+            almazny.clk.eq(self.ext.sck & stb.o),
             # simple solution - latch after writing is done
             latch_signal.eq(~stb.o),
         ]
@@ -181,10 +181,10 @@ class SR(Module):
 
         # latch can stay up indefinitely, it's only rising edge that counts
         self.comb += [
-            pt.latch1.eq((saved_adr == 0) & latch_signal),
-            pt.latch2.eq((saved_adr == 1) & latch_signal),
-            pt.latch3.eq((saved_adr == 2) & latch_signal),
-            pt.latch4.eq((saved_adr == 3) & latch_signal),
+            almazny.latch1.eq((saved_adr == 0) & latch_signal),
+            almazny.latch2.eq((saved_adr == 1) & latch_signal),
+            almazny.latch3.eq((saved_adr == 2) & latch_signal),
+            almazny.latch4.eq((saved_adr == 3) & latch_signal),
         ]
 
 
