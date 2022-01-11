@@ -158,33 +158,30 @@ class SR(Module):
         self._check_intersection(adr, mask)
         self._slaves.append((almazny, adr, mask))
         stb = AsyncRst()
+        latches = Signal(4)
         self.submodules += stb
-
-        saved_adr = Signal(2)
-        latch_signal = Signal()
 
         self.comb += [
             stb.i.eq(((self.bus.adr & adr) == adr) & (self.ext.cs)),
             stb.ce.eq(self.bus.re),
             almazny.mosi.eq(self.ext.sdi),
             almazny.clk.eq(self.ext.sck & stb.o),
-            # simple solution - latch after writing is done
-            latch_signal.eq(~stb.o),
         ]
 
         # update saved address when we write to almazny
-        self.sync += [
-            If(stb.o,
-                saved_adr.eq(self.bus.adr[:2]),
-            )
-        ]
+        for i in range(4):
+            self.sync += [
+                If(stb.o,
+                    latches[i].eq(self.bus.adr[:2] == i),
+                )
+            ]
 
         # latch can stay up indefinitely, it's only rising edge that counts
         self.comb += [
-            almazny.latch1.eq((saved_adr == 0) & latch_signal),
-            almazny.latch2.eq((saved_adr == 1) & latch_signal),
-            almazny.latch3.eq((saved_adr == 2) & latch_signal),
-            almazny.latch4.eq((saved_adr == 3) & latch_signal),
+            almazny.latch1.eq(latches[0] & ~stb.o),
+            almazny.latch2.eq(latches[1] & ~stb.o),
+            almazny.latch3.eq(latches[2] & ~stb.o),
+            almazny.latch4.eq(latches[3] & ~stb.o),
         ]
 
 
