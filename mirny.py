@@ -166,7 +166,7 @@ class SR(Module):
         self.comb += [
             stb.i.eq(((self.bus.adr & adr) == adr) & (self.ext.cs)),
             stb.ce.eq(self.bus.re),
-            almazny.mosi.eq(self.ext.sdi & stb.o),
+            almazny.mosi.eq(self.ext.sdi),
             almazny.clk.eq(self.ext.sck & stb.o),
             # simple solution - latch after writing is done
             latch_signal.eq(~stb.o),
