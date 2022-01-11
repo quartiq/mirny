@@ -181,10 +181,10 @@ class SR(Module):
 
         # latch can stay up indefinitely, it's only rising edge that counts
         self.comb += [
-            pt.lt1.eq((saved_adr == 0) & latch_signal),
-            pt.lt2.eq((saved_adr == 1) & latch_signal),
-            pt.lt3.eq((saved_adr == 2) & latch_signal),
-            pt.lt4.eq((saved_adr == 3) & latch_signal),
+            pt.latch1.eq((saved_adr == 0) & latch_signal),
+            pt.latch2.eq((saved_adr == 1) & latch_signal),
+            pt.latch3.eq((saved_adr == 2) & latch_signal),
+            pt.latch4.eq((saved_adr == 3) & latch_signal),
         ]
 
 
@@ -218,24 +218,24 @@ class Mirny(Module):
 
     SPI xfer is ADR(7), WE(1), DAT(REG: 16, ATT: 8, PLL: 32, SR: 8)
 
-    | ADR | TARGET        |
-    |-----+---------------|
-    | 0   | REG0          |
-    | 1   | REG1          |
-    | 2   | REG2          |
-    | 3   | REG3          |
-    | 4   | PLL0          |
-    | 5   | PLL1          |
-    | 6   | PLL2          |
-    | 7   | PLL3          |
-    | 8   | ATT0          |
-    | 9   | ATT1          |
-    | a   | ATT2          |
-    | b   | ATT3          |
-    | c   | (Almazny) SR1 |
-    | d   | (Almazny) SR2 |
-    | e   | (Almazny) SR3 |
-    | f   | (Almazny) SR4 |
+    | ADR | TARGET               |
+    |-----+----------------------|
+    | 0   | REG0                 |
+    | 1   | REG1                 |
+    | 2   | REG2                 |
+    | 3   | REG3                 |
+    | 4   | PLL0                 |
+    | 5   | PLL1                 |
+    | 6   | PLL2                 |
+    | 7   | PLL3                 |
+    | 8   | ATT0                 |
+    | 9   | ATT1                 |
+    | a   | ATT2                 |
+    | b   | ATT3                 |
+    | c   | (Legacy Almazny) SR1 |
+    | d   | (Legacy Almazny) SR2 |
+    | e   | (Legacy Almazny) SR3 |
+    | f   | (Legacy Almazny) SR4 |
 
     The SPI interface is CPOL=0, CPHA=0, SPI mode 0, 4-wire, full fuplex.
 
@@ -268,7 +268,7 @@ class Mirny(Module):
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
     | MUXOUT_EEM| 1     | route MUXOUT to EEM[4:8]           |
     | EEM_MEZZIO| 1     | route EEM[4:8] to MEZZ_IO[0:4]     |
-    | ALMAZNY_OE| 1     | Almazny OE in legacy almazny mode  |
+    | ALMAZNY_OE| 1     | Almazny OE in legacy Almazny mode  |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
