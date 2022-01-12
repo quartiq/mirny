@@ -164,8 +164,8 @@ class SR(Module):
         self.comb += [
             stb.i.eq(((self.bus.adr & adr) == adr) & (self.ext.cs)),
             stb.ce.eq(self.bus.re),
-            almazny.mosi.eq(self.ext.sdi),
-            almazny.clk.eq(self.ext.sck & stb.o),
+            almazny.clk.eq(self.ext.sck),
+            almazny.mosi.eq(self.ext.sdi & stb.o),
         ]
 
         # update saved address when we write to almazny
