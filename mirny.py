@@ -153,35 +153,6 @@ class SR(Module):
             ),
         ]
 
-    def connect_almazny_passthrough(self, almazny, adr, mask):
-        # for use w/ almazny
-        self._check_intersection(adr, mask)
-        self._slaves.append((almazny, adr, mask))
-        stb = AsyncRst()
-        latches = AsyncRst(width=4, reset=0xF)
-        self.submodules += latches, stb
-
-        self.comb += [
-            stb.i.eq(((self.bus.adr & adr) == adr)),
-            stb.ce.eq(self.bus.re),
-            latches.ce.eq(stb.o),
-            almazny.clk.eq(self.ext.sck),
-            almazny.mosi.eq(self.ext.sdi & stb.o),
-        ]
-
-        # update saved address when we write to almazny
-        for i in range(4):
-            self.sync += latches.i[i].eq(self.bus.adr[:2] != i)
-
-        # latch can stay up indefinitely, it's only rising edge that counts
-        self.comb += [
-            almazny.latch1.eq(latches.o[0]),
-            almazny.latch2.eq(latches.o[1]),
-            almazny.latch3.eq(latches.o[2]),
-            almazny.latch4.eq(latches.o[3]),
-        ]
-
-
 def intersection(a, b):
     (aa, am), (ba, bm) = a, b
     # TODO
@@ -347,18 +318,31 @@ class Mirny(Module):
         ]
 
         if legacy_almazny:
-            almazny_io = platform.request("legacy_almazny_io")
+            almazny_io = platform.request("legacy_almazny_common")
             almazny_adr = 0b1100  # 1100 - and then 1101, 1110, 1111 for sr 1-4
             almazny_mask = 0b0011
-            self.sr.connect_almazny_passthrough(almazny_io, almazny_adr, almazny_mask)
+            ext = Record(ext_layout)
+            self.sr.connect_ext(ext, almazny_adr, almazny_adr)
+            latches = AsyncRst(width=4, reset=0xF)
+            self.submodules += latches
 
+            self.comb += [
+                latches.ce.eq(ext.cs),
+                almazny_io.clk.eq(ext.sck),
+                almazny_io.mosi.eq(ext.sdi),
+                # hardcode SRCLR#
+                almazny_io.srclr.eq(1)
+            ]
+            
             for i in range(4):
-                pin = platform.request("legacy_almazny_noe", i)
-                self.comb += pin.eq(~regs[1].write[12])
+                almazny = platform.request("legacy_almazny", i)
+                # update saved address when we write to almazny
+                self.sync += latches.i[i].eq(self.sr.bus.adr[:2] != i)
+                self.comb += [ 
+                    almazny.latch.eq(latches.o[i]),
+                    almazny.noe.eq(~regs[1].write[12])
+                ]
 
-            # hardcode SRCLR#
-            srclr = platform.request("legacy_almazny_srclr")
-            self.comb += srclr.eq(1)
         else:
             for i, m in enumerate(platform.request("mezz_io")):
                 tsi = TSTriple()
