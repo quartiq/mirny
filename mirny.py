@@ -320,7 +320,6 @@ class Mirny(Module):
         if legacy_almazny:
             almazny_io = platform.request("legacy_almazny_common")
             almazny_adr = 0b1100  # 1100 - and then 1101, 1110, 1111 for sr 1-4
-            almazny_mask = 0b0011
             ext = Record(ext_layout)
             self.sr.connect_ext(ext, almazny_adr, almazny_adr)
             latches = AsyncRst(width=4, reset=0xF)
@@ -330,13 +329,11 @@ class Mirny(Module):
                 latches.ce.eq(ext.cs),
                 almazny_io.clk.eq(ext.sck),
                 almazny_io.mosi.eq(ext.sdi),
-                # hardcode SRCLR#
                 almazny_io.srclr.eq(1)
             ]
             
             for i in range(4):
                 almazny = platform.request("legacy_almazny", i)
-                # update saved address when we write to almazny
                 self.sync += latches.i[i].eq(self.sr.bus.adr[:2] != i)
                 self.comb += [ 
                     almazny.latch.eq(latches.o[i]),
