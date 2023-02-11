@@ -3,13 +3,13 @@ all: build
 
 .PHONY: test
 test:
-	python mirny_sim.py
+	python3 mirny_sim.py
 
 .PHONY: build
 build: build/mirny.vm6
 
 build/mirny.vm6: mirny.py mirny_cpld.py
-	python mirny_impl.py
+	python3 mirny_impl.py
 
 REV:=$(shell git describe --always --abbrev=8 --dirty)
 
