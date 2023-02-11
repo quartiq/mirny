@@ -317,17 +317,6 @@ class Mirny(Module):
             platform.request("fsen").eq(~regs[1].write[9]),
         ]
 
-        for i, m in enumerate(platform.request("mezz_io")):
-            tsi = TSTriple()
-            self.specials += tsi.get_tristate(m)
-            self.comb += [
-                tsi.o.eq(regs[3].write[i] | (0 if i >= 4 else
-                    (regs[1].write[11] & eem[i + 4].i))),
-                regs[3].read[i].eq(tsi.i),
-                tsi.oe.eq(regs[3].write[i + 8]),
-                regs[3].read[i + 8].eq(tsi.oe),
-            ]
-
         for i in range(4):
             rf_sw = platform.request("rf_sw", i)
             self.comb += [
@@ -363,11 +352,26 @@ class Mirny(Module):
                 att.le.eq(~ext.cs),
             ]
 
+        ext = Record(ext_layout)
+        self.sr.connect_ext(ext, adr=12, mask=mask)
+        mezz = platform.request("mezz_io")
+        for i, sig in enumerate([ext.sdi, ext.sck,
+            regs[3].write[2], regs[3].write[3], regs[3].write[4],
+            regs[3].write[5], regs[3].write[6], regs[3].write[7]]):
+            tsi = TSTriple()
+            self.specials += tsi.get_tristate(mezz[i])
+            self.comb += [
+                tsi.o.eq(sig),
+                regs[3].read[i].eq(tsi.i),
+                tsi.oe.eq(regs[3].write[i + 8]),
+                regs[3].read[i + 8].eq(tsi.oe),
+            ]
+
         tp = [platform.request("tp", i) for i in range(5)]
         self.comb += [
-            tp[0].eq(self.sr.ext.sck),
-            tp[1].eq(eem[1].i),
-            tp[2].eq(eem[2].i),
-            tp[3].eq(self.sr.bus.re),
-            tp[4].eq(self.sr.bus.we),
+            #tp[0].eq(self.sr.ext.sck),
+            #tp[1].eq(eem[1].i),
+            #tp[2].eq(eem[2].i),
+            #tp[3].eq(self.sr.bus.re),
+            #tp[4].eq(self.sr.bus.we),
         ]
