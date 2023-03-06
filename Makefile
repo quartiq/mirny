@@ -1,14 +1,15 @@
 .PHONY: all
 all: build
 
-.PHONY: test
-test:
-	python3 mirny_sim.py
+.PHONY: prep
+prep:
+	python3 -m venv --system-site-packages .venv
+	./.venv/bin/pip install -r requirements.txt
 
 .PHONY: build
 build: build/mirny.vm6
 
-build/mirny.vm6: mirny.py mirny_cpld.py
+build/mirny.vm6: mirny.py mirny_cpld.py mirny_impl.py
 	python3 mirny_impl.py
 
 REV:=$(shell git describe --always --abbrev=8 --dirty)
