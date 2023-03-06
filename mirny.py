@@ -312,9 +312,16 @@ class Mirny(Module):
             platform.request("fsen").eq(~regs[1].write[9]),
         ]
 
-        mezz = platform.request("mezz_io")
+        mezz_io = platform.request("mezz_io")
+        mezz = []
+        for i in range(len(mezz_io)):
+            t = TSTriple()
+            self.specials += t.get_tristate(mezz_io[i])
+            mezz.append(t)
         self.comb += [
-            mezz[7].eq(regs[1].write[11])  # Almazny REG_NOE
+            mezz[7].oe.eq(1),
+            mezz[7].o.eq(regs[1].write[11]),  # Almazny REG_NOE
+            mezz[2].oe.eq(0),  # Almazny PGOOD
         ]
 
         for i in range(4):
@@ -355,12 +362,15 @@ class Mirny(Module):
             ext = Record(ext_layout)
             self.sr.connect_ext(ext, adr=i + 12, mask=mask)
             self.comb += [
-                mezz[i + 3].eq(ext.cs),  # Almazny REG_LATCH
+                mezz[i + 3].oe.eq(1),
+                mezz[i + 3].o.eq(~ext.cs),  # Almazny REG_LATCH
             ]
             if i == 0:
                 self.comb += [
-                    mezz[0].eq(ext.sdi),  # Almazny SER_MOSI
-                    mezz[1].eq(ext.sck),  # Almazny SER_SCK
+                    mezz[0].oe.eq(1),
+                    mezz[0].o.eq(ext.sdi),  # Almazny SER_MOSI
+                    mezz[1].oe.eq(1),
+                    mezz[1].o.eq(ext.sck),  # Almazny SER_SCK
                 ]
 
         tp = [platform.request("tp", i) for i in range(5)]
