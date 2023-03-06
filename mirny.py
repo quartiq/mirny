@@ -168,40 +168,40 @@ class Mirny(Module):
     Pin Out
     -------
 
-    | EEM LVDS pair | Function               |
-    |---------------+------------------------|
-    | EEM 0         | SCLK                   |
-    | EEM 1         | MOSI                   |
-    | EEM 2         | MISO, MUXOUT           |
-    | EEM 3         | CS                     |
-    | EEM 4         | SW0, MUXOUT0, MEZZ_IO0 |
-    | EEM 5         | SW1, MUXOUT1, MEZZ_IO1 |
-    | EEM 6         | SW2, MUXOUT2, MEZZ_IO2 |
-    | EEM 7         | SW3, MUXOUT3, MEZZ_IO3 |
+    | EEM LVDS pair | Function     |
+    |---------------+--------------|
+    | EEM 0         | SCLK         |
+    | EEM 1         | MOSI         |
+    | EEM 2         | MISO, MUXOUT |
+    | EEM 3         | CS           |
+    | EEM 4         | SW0, MUXOUT0 |
+    | EEM 5         | SW1, MUXOUT1 |
+    | EEM 6         | SW2, MUXOUT2 |
+    | EEM 7         | SW3, MUXOUT3 |
 
     SPI
     ---
 
-    SPI xfer is ADR(7), WE(1), DAT(REG: 16, ATT: 8, PLL: 32)
+    SPI xfer is ADR(7), WE(1), DAT(REG: 16, ATT: 8, PLL: 32, MEZ: 8)
 
-    | ADR | TARGET |
-    |--------+--------|
-    | 0 | REG0     |
-    | 1 | REG1     |
-    | 2 | REG2     |
-    | 3 | REG3     |
-    | 4 | PLL0     |
-    | 5 | PLL1     |
-    | 6 | PLL2     |
-    | 7 | PLL3     |
-    | 8 | ATT0     |
-    | 9 | ATT1     |
-    | a | ATT2     |
-    | b | ATT3     |
-    | c | reserved |
-    | d | reserved |
-    | e | reserved |
-    | f | reserved |
+    | ADDR | TARGET |
+    |------+--------|
+    | 0 | REG0 |
+    | 1 | REG1 |
+    | 2 | REG2 |
+    | 3 | REG3 |
+    | 4 | PLL0 |
+    | 5 | PLL1 |
+    | 6 | PLL2 |
+    | 7 | PLL3 |
+    | 8 | ATT0 |
+    | 9 | ATT1 |
+    | a | ATT2 |
+    | b | ATT3 |
+    | c | MEZ0 |
+    | d | MEZ1 |
+    | e | MEZ2 |
+    | f | MEZ3 |
 
     The SPI interface is CPOL=0, CPHA=0, SPI mode 0, 4-wire, full fuplex.
 
@@ -233,16 +233,11 @@ class Mirny(Module):
     | ATT_RST   | 1     | Attenuator reset                   |
     | FSEN_N    | 1     | LVDS fail safe, Type 2 (bar)       |
     | MUXOUT_EEM| 1     | route MUXOUT to EEM[4:8]           |
-    | EEM_MEZZIO| 1     | route EEM[4:8] to MEZZ_IO[0:4]     |
+    | MEZ_OE_N  | 1     | Mezzanine (Almazny) REG_NOE        |
 
     | Name      | Width | Function                           |
     |-----------+-------+------------------------------------|
     | RF_SW     | 4     | RF switch state                    |
-
-    | Name      | Width | Function                           |
-    |-----------+-------+------------------------------------|
-    | MEZZ_IO   | 8     | Mezzanine IO                       |
-    | MEZZ_OE   | 8     | Mezzanine OE                       |
 
     Test points
     -----------
@@ -292,7 +287,7 @@ class Mirny(Module):
             self.sr.ext.cs.eq(eem[3].i),
         ]
 
-        regs = [REG(), REG(width=12), REG(width=4), REG()]
+        regs = [REG(), REG(width=12), REG(width=4)]
         self.submodules += regs
         for i, reg in enumerate(regs):
             self.sr.connect(reg.bus, adr=i, mask=mask)
@@ -317,11 +312,16 @@ class Mirny(Module):
             platform.request("fsen").eq(~regs[1].write[9]),
         ]
 
+        mezz = platform.request("mezz_io")
+        self.comb += [
+            mezz[7].eq(regs[1].write[11])  # Almazny REG_NOE
+        ]
+
         for i in range(4):
             rf_sw = platform.request("rf_sw", i)
             self.comb += [
                 rf_sw.eq(regs[2].write[i] | (
-                    ~regs[1].write[11] & ~regs[1].write[10] & eem[4 + i].i)),
+                    ~regs[1].write[10] & eem[4 + i].i)),
                 eem[4 + i].oe.eq(regs[1].write[10]),
             ]
 
@@ -352,26 +352,22 @@ class Mirny(Module):
                 att.le.eq(~ext.cs),
             ]
 
-        ext = Record(ext_layout)
-        self.sr.connect_ext(ext, adr=12, mask=mask)
-        mezz = platform.request("mezz_io")
-        for i, sig in enumerate([ext.sdi, ext.sck,
-            regs[3].write[2], regs[3].write[3], regs[3].write[4],
-            regs[3].write[5], regs[3].write[6], regs[3].write[7]]):
-            tsi = TSTriple()
-            self.specials += tsi.get_tristate(mezz[i])
+            ext = Record(ext_layout)
+            self.sr.connect_ext(ext, adr=i + 12, mask=mask)
             self.comb += [
-                tsi.o.eq(sig),
-                regs[3].read[i].eq(tsi.i),
-                tsi.oe.eq(regs[3].write[i + 8]),
-                regs[3].read[i + 8].eq(tsi.oe),
+                mezz[i + 3].eq(ext.cs),  # Almazny REG_LATCH
             ]
+            if i == 0:
+                self.comb += [
+                    mezz[0].eq(ext.sdi),  # Almazny SER_MOSI
+                    mezz[1].eq(ext.sck),  # Almazny SER_SCK
+                ]
 
         tp = [platform.request("tp", i) for i in range(5)]
         self.comb += [
-            #tp[0].eq(self.sr.ext.sck),
-            #tp[1].eq(eem[1].i),
-            #tp[2].eq(eem[2].i),
-            #tp[3].eq(self.sr.bus.re),
-            #tp[4].eq(self.sr.bus.we),
+            tp[0].eq(self.sr.ext.sck),
+            tp[1].eq(eem[1].i),
+            tp[2].eq(eem[2].i),
+            tp[3].eq(self.sr.bus.re),
+            tp[4].eq(self.sr.bus.we),
         ]
