@@ -135,7 +135,7 @@ class SR(Module):
             )
         ]
 
-    def connect_ext(self, ext, adr, mask):
+    def connect_ext(self, ext, adr, mask, sdi_passthrough=False):
         adr &= mask
         self._check_intersection(adr, mask)
         self._slaves.append((ext, adr, mask))
@@ -146,12 +146,16 @@ class SR(Module):
             stb.ce.eq(self.bus.re),
             # don't glitch with &stb.o
             ext.sck.eq(self.ext.sck),
-            ext.sdi.eq(self.ext.sdi & stb.o),
             ext.cs.eq(stb.o),
             If(stb.o,
                 self.ext.sdo.eq(ext.sdo),
             ),
         ]
+        # Almazny shares one SDI with 4 devices, it cannot be masked by stb
+        if sdi_passthrough:
+            self.comb += ext.sdi.eq(self.ext.sdi)
+        else:
+            self.comb += ext.sdi.eq(self.ext.sdi & stb.o),
 
 
 def intersection(a, b):
@@ -360,7 +364,7 @@ class Mirny(Module):
             ]
 
             ext = Record(ext_layout)
-            self.sr.connect_ext(ext, adr=i + 12, mask=mask)
+            self.sr.connect_ext(ext, adr=i + 12, mask=mask, sdi_passthrough=True)
             self.comb += [
                 mezz[i + 3].oe.eq(1),
                 mezz[i + 3].o.eq(~ext.cs),  # Almazny REG_LATCH
